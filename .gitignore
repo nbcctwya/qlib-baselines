@@ -1,0 +1,26 @@
+# ---- Qlib runtime artifacts (large, regeneratable) ----
+data_cache/
+mlruns/
+home/
+
+# ---- Reports: ignore generated charts, keep the metrics table ----
+reports/*.png
+!reports/comparison_table.csv
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# ---- Env / editor / OS ----
+*.log
+.env
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store

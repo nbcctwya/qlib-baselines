@@ -1,0 +1,16 @@
+# Working versions verified in the qlib-env conda environment.
+# pyqlib pulls most transitive deps; the pins below lock the versions that
+# were tested end-to-end with this project.
+numpy==2.0.2
+pandas==2.3.3
+scipy==1.13.1
+scikit-learn==1.6.1
+xgboost==2.1.4
+lightgbm==4.6.0
+pyqlib==0.9.7
+matplotlib>=3.9
+
+# PyTorch 2.8 with CUDA 12.9 (matches the RTX 5060 Ti / driver 581.80).
+# Install separately because the cu129 wheel lives on PyTorch's index:
+#   pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129
+torch==2.8.0
