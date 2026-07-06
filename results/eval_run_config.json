@@ -47,6 +47,14 @@
     "MDD": "min(nav/cummax-1), nav=exp(cumsum(g))",
     "Calmar": "AR/abs(MDD)"
   },
+  "ensemble": {
+    "enabled": true,
+    "normalize": "none",
+    "join": "inner",
+    "ranking_metrics": "mean of the 5 single-seed values (from eval_detail.csv)",
+    "backtest": "TopkDropoutStrategy on the ensemble score; same TopK/DropN/cost as single seed",
+    "score_formula": "mean(score_seed0..4); optional per-day cross-sectional zscore (ddof=0) or rank-pct"
+  },
   "evaluated": {
     "markets": [
       "csi300",
