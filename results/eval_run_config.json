@@ -1,0 +1,69 @@
+{
+  "note": "Backtest is REUSED from run.py outputs; metrics recomputed with paper convention.",
+  "test_period": {
+    "train": [
+      "2009-01-01",
+      "2020-12-31"
+    ],
+    "valid": [
+      "2021-01-01",
+      "2022-12-31"
+    ],
+    "test": [
+      "2023-01-01",
+      "2025-12-31"
+    ]
+  },
+  "strategy": {
+    "class": "TopkDropoutStrategy",
+    "topk": 30,
+    "n_drop": 5,
+    "weighting": "equal"
+  },
+  "cost_by_market": {
+    "csi300": {
+      "open_cost": 0.0005,
+      "close_cost": 0.0015,
+      "min_cost": 0,
+      "deal_price": "close",
+      "limit_threshold": 0.095
+    },
+    "sp500": {
+      "open_cost": 0.0005,
+      "close_cost": 0.0015,
+      "min_cost": 0,
+      "deal_price": "close",
+      "limit_threshold": null
+    }
+  },
+  "metric_convention": {
+    "annualization_factor": 252,
+    "std_ddof": 1,
+    "rf": 0,
+    "sharpe": "sqrt(252)*mean(log(1+r_after_cost))/std",
+    "sortino": "sqrt(252)*mean(g)/std(negative g)",
+    "AR": "exp(mean(g)*252)-1",
+    "STD": "std(g)*sqrt(252)",
+    "MDD": "min(nav/cummax-1), nav=exp(cumsum(g))",
+    "Calmar": "AR/abs(MDD)"
+  },
+  "evaluated": {
+    "markets": [
+      "csi300",
+      "sp500"
+    ],
+    "models": [
+      "XGBoost",
+      "GRU",
+      "TCN",
+      "Transformer"
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  }
+}
