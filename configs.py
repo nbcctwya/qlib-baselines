@@ -124,7 +124,11 @@ def port_analysis_config(market_key: str) -> dict:
 #   ts=False -> DatasetH (XGBoost)
 # --------------------------------------------------------------------------- #
 STEP_LEN = 20
-SEED = 0
+# Random seeds swept for every (market, model). `seed` is injected into every
+# model's init_kwargs at runtime (XGBoost via its `seed` param, the _ts models
+# set np.random.seed + torch.manual_seed in __init__), so it is intentionally
+# NOT stored in the MODELS dicts below.
+SEEDS = [0, 1, 2, 3, 4]
 
 MODELS = {
     "XGBoost": dict(
@@ -149,7 +153,7 @@ MODELS = {
         init_kwargs=dict(
             d_feat=20, hidden_size=64, num_layers=2, dropout=0.0,
             n_epochs=200, lr=2e-4, early_stop=10, batch_size=800,
-            metric="loss", loss="mse", n_jobs=20, GPU=0, seed=SEED,
+            metric="loss", loss="mse", n_jobs=20, GPU=0,
         ),
         fit_kwargs={},
     ),
@@ -160,7 +164,7 @@ MODELS = {
         init_kwargs=dict(
             d_feat=20, num_layers=5, n_chans=32, kernel_size=7, dropout=0.5,
             n_epochs=200, lr=1e-4, early_stop=20, batch_size=2000,
-            metric="loss", loss="mse", optimizer="adam", n_jobs=20, GPU=0, seed=SEED,
+            metric="loss", loss="mse", optimizer="adam", n_jobs=20, GPU=0,
         ),
         fit_kwargs={},
     ),
@@ -171,7 +175,7 @@ MODELS = {
         init_kwargs=dict(
             d_feat=20, d_model=64, batch_size=8192, nhead=2, num_layers=2,
             dropout=0, n_epochs=100, lr=1e-4, early_stop=5, reg=1e-3,
-            seed=SEED, n_jobs=20, GPU=0,
+            n_jobs=20, GPU=0,
         ),
         fit_kwargs={},
     ),

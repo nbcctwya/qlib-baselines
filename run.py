@@ -1,18 +1,20 @@
-"""Run all model x market experiments through the qlib.workflow Python API.
+"""Run all model x market x seed experiments through the qlib.workflow Python API.
 
-For each market: load the cached Alpha158 handler ONCE, then for each model wrap
-it in DatasetH (XGBoost) or TSDatasetH (GRU/TCN/Transformer), fit, predict, and
-backtest via SignalRecord / SigAnaRecord / PortAnaRecord under an MLflow recorder.
+For each market: load the cached Alpha158 handler ONCE, then for each (model,
+seed) wrap it in DatasetH (XGBoost) or TSDatasetH (GRU/TCN/Transformer), fit,
+predict, and backtest via SignalRecord / SigAnaRecord / PortAnaRecord under an
+MLflow recorder. `seed` is injected into every model's init_kwargs (XGBoost's
+`seed` param; the _ts models set np/torch RNGs in __init__).
 
 Reusing the cached handler: constructing DatasetH/TSDatasetH(handler=h, segments=...)
 does NOT call handler.setup_data (DatasetH.setup_data only forwards when
 handler_kwargs is given), so the pickled _data/_infer/_learn are used directly -
-zero feature recomputation across models.
+zero feature recomputation across models and seeds.
 
 Usage:
-    python run.py                                   # all 4 models x 2 markets
-    python run.py --markets csi300 --models XGBoost GRU
-    python run.py --markets csi300 --models XGBoost --smoke   # tiny HPs, fast gate
+    python run.py                                   # all 4 models x 2 markets x SEEDS
+    python run.py --markets csi300 --models XGBoost --seeds 0 1
+    python run.py --markets csi300 --models XGBoost --smoke   # tiny HPs, seed 0 only
 """
 import argparse
 import importlib
@@ -29,7 +31,7 @@ from qlib.workflow import R
 from qlib.workflow.record_temp import SignalRecord, SigAnaRecord, PortAnaRecord
 
 from configs import (
-    MARKETS, MODELS, SEGMENTS, STEP_LEN, SEED,
+    MARKETS, MODELS, SEGMENTS, STEP_LEN, SEEDS,
     port_analysis_config, DATA_CACHE_DIR, MLRUNS_DIR,
 )
 
@@ -37,7 +39,7 @@ from configs import (
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-def set_seed(seed: int = SEED) -> None:
+def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -68,29 +70,30 @@ def build_dataset(handler: DataHandlerLP, model_name: str):
 def smoke_overrides(model_name: str, init_kwargs: dict, fit_kwargs: dict):
     """Cut hyperparameters to a fraction of their size for a fast pipeline gate."""
     if model_name == "XGBoost":
-        init_kwargs = {**init_kwargs, "n_estimators": 20}
-        fit_kwargs = {**fit_kwargs, "num_boost_round": 20, "early_stopping_rounds": 5}
+        init_kwargs.update(n_estimators=20)
+        fit_kwargs.update(num_boost_round=20, early_stopping_rounds=5)
     else:  # DNN models
-        init_kwargs = {**init_kwargs, "n_epochs": 2, "early_stop": 1}
+        init_kwargs.update(n_epochs=2, early_stop=1)
     return init_kwargs, fit_kwargs
 
 
-def run_one(market_key: str, model_name: str, handler: DataHandlerLP, smoke: bool) -> None:
-    set_seed(SEED)
+def run_one(market_key: str, model_name: str, handler: DataHandlerLP,
+            seed: int, smoke: bool) -> None:
+    set_seed(seed)
     ds = build_dataset(handler, model_name)
 
     spec = MODELS[model_name]
     init_kwargs = dict(spec["init_kwargs"])
+    init_kwargs["seed"] = seed            # injected for ALL models (XGB + DNN)
     fit_kwargs = dict(spec["fit_kwargs"])
     if smoke:
         init_kwargs, fit_kwargs = smoke_overrides(model_name, init_kwargs, fit_kwargs)
 
-    model_cls = get_model_class(model_name)
-    model = model_cls(**init_kwargs)
+    model = get_model_class(model_name)(**init_kwargs)
 
     uri = f"file:{(MLRUNS_DIR / market_key).resolve()}"
     (MLRUNS_DIR / market_key).mkdir(parents=True, exist_ok=True)
-    exp_name = f"{market_key}_{model_name}"
+    exp_name = f"{market_key}_{model_name}_seed{seed}"
 
     print(f"\n=== {exp_name} ==={'  [SMOKE]' if smoke else ''}")
     with R.start(experiment_name=exp_name, uri=uri):
@@ -109,7 +112,7 @@ def run_one(market_key: str, model_name: str, handler: DataHandlerLP, smoke: boo
     print(f"--- {exp_name} done")
 
 
-def run_market(market_key: str, model_names, smoke: bool) -> None:
+def run_market(market_key: str, model_names, seeds, smoke: bool) -> None:
     cfg = MARKETS[market_key]
     handler_path = DATA_CACHE_DIR / f"{market_key}_handler.pkl"
     if not handler_path.exists():
@@ -119,27 +122,30 @@ def run_market(market_key: str, model_names, smoke: bool) -> None:
 
     qlib.init(provider_uri=cfg["provider_uri"], region=cfg["region"])
     print(f"[{market_key}] loading cached handler ...")
-    handler = DataHandlerLP.load(handler_path)   # loaded once, shared across this market's models
+    handler = DataHandlerLP.load(handler_path)   # loaded once, shared across models+seeds
 
     for model_name in model_names:
         if model_name not in MODELS:
             raise SystemExit(f"unknown model {model_name!r}; choose from {list(MODELS)}")
-        try:
-            run_one(market_key, model_name, handler, smoke)
-        except Exception:
-            # Keep going so one failure does not block the other 7 experiments.
-            import traceback
-            print(f"!!! {market_key}/{model_name} FAILED:\n{traceback.format_exc()}")
+        for seed in seeds:
+            try:
+                run_one(market_key, model_name, handler, seed, smoke)
+            except Exception:
+                # Keep going so one failure does not block the other experiments.
+                import traceback
+                print(f"!!! {market_key}/{model_name}/seed{seed} FAILED:\n{traceback.format_exc()}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--markets", nargs="+", default=list(MARKETS))
     ap.add_argument("--models", nargs="+", default=list(MODELS))
-    ap.add_argument("--smoke", action="store_true", help="tiny HPs for a fast end-to-end gate")
+    ap.add_argument("--seeds", nargs="+", type=int, default=list(SEEDS))
+    ap.add_argument("--smoke", action="store_true", help="tiny HPs, seed 0 only, fast gate")
     args = ap.parse_args()
 
+    seeds = [0] if args.smoke else args.seeds
     for mk in args.markets:
         if mk not in MARKETS:
             raise SystemExit(f"unknown market {mk!r}; choose from {list(MARKETS)}")
-        run_market(mk, args.models, args.smoke)
+        run_market(mk, args.models, seeds, args.smoke)
