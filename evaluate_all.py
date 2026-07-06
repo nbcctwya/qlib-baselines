@@ -193,7 +193,8 @@ def build_ensemble_score(seed_preds, normalize: str = "none", join: str = "inner
 
 
 def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
-                          ic_means: dict, normalize: str, join: str) -> dict:
+                          ic_means: dict, normalize: str, join: str,
+                          save_nav_dir: "Path | None" = None) -> dict:
     """Backtest the ensemble score and compute portfolio metrics.
 
     ic_means: {IC,ICIR,RankIC,RankICIR} = mean of the 5 single-seed values.
@@ -201,6 +202,9 @@ def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
     (configs.backtest_config(market)), so conventions are identical.
 
     Caller must have already run qlib.init(provider=<market>) + R.set_uri(<market>).
+
+    If save_nav_dir is given, also dumps the ensemble cumulative-return (NAV)
+    series to <save_nav_dir>/<market>_<model>.csv for downstream plotting.
     """
     ensemble, info = build_ensemble_score(seed_preds, normalize, join)
     logger.info("  [%s/%s] ensemble samples: per-seed(non-null)=%s | joined=%d | NaN=%d",
@@ -224,6 +228,25 @@ def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
         strategy=strategy, account=bt["account"],
         benchmark=bt["benchmark"], exchange_kwargs=exkw,
     )
+    if save_nav_dir is not None:
+        daily_net = report["return"] - report["cost"]
+        nav = pd.DataFrame({
+            "daily_ret_gross": report["return"].values,
+            "cost": report["cost"].values,
+            "daily_ret_net": daily_net.values,
+            "bench_ret": report["bench"].values,
+        }, index=report.index)
+        nav["nav"] = (1.0 + nav["daily_ret_net"]).cumprod()
+        nav["nav"] = nav["nav"] / nav["nav"].iloc[0]            # normalize start to 1.0
+        nav["bench_nav"] = (1.0 + nav["bench_ret"]).cumprod()
+        nav["bench_nav"] = nav["bench_nav"] / nav["bench_nav"].iloc[0]
+        nav.index.name = "datetime"
+        save_nav_dir.mkdir(parents=True, exist_ok=True)
+        nav_path = save_nav_dir / f"{market}_{model}.csv"
+        nav.to_csv(nav_path)
+        logger.info("  [%s/%s] ensemble NAV -> %s (%d days, end nav=%.4f, bench=%.4f)",
+                    market, model, nav_path, len(nav),
+                    nav["nav"].iloc[-1], nav["bench_nav"].iloc[-1])
     # report["return"] is gross; after-cost = return - cost (same as single seed, no double count)
     port = compute_portfolio_metrics(report["return"] - report["cost"])
 
@@ -271,7 +294,8 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
                 icm = ic_mean_by_model.loc[mdl].to_dict() if mdl in ic_mean_by_model.index else \
                     {k: np.nan for k in IC_COLS}
                 row = evaluate_ensemble_one(mk, mdl, seed_preds, seed_paths, icm,
-                                            args.ensemble_normalize, args.ensemble_join)
+                                            args.ensemble_normalize, args.ensemble_join,
+                                            save_nav_dir=out_dir / "ensemble_nav")
                 ens_rows.append(row)
                 logger.info("  [%s/%s] ensemble IC=%.4f AR=%.4f Sharpe=%.4f Calmar=%.4f",
                             mk, mdl, row["IC"], row["AR"], row["Sharpe"], row["Calmar"])
