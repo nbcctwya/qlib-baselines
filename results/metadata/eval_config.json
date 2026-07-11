@@ -1,5 +1,12 @@
 {
+  "baseline": "qlib_alpha158",
+  "git_commit": "7403eb0833d9ec6fb1fae5c801a7bc95e154f50a",
   "note": "Backtest is REUSED from run.py outputs; metrics recomputed with paper convention.",
+  "return_semantics": {
+    "return_field": "gross portfolio simple return before transaction cost",
+    "cost_field": "daily transaction cost rate",
+    "net_formula": "report['return'] - report['cost']; cost is deducted exactly once"
+  },
   "test_period": {
     "train": [
       "2009-01-01",
@@ -34,6 +41,22 @@
       "min_cost": 0,
       "deal_price": "close",
       "limit_threshold": null
+    }
+  },
+  "data_by_market": {
+    "csi300": {
+      "provider_uri": "~/.qlib/qlib_data/cn_data",
+      "region": "cn",
+      "benchmark": "SH000300",
+      "instrument_list": "csi300",
+      "data_calendar_end": "2026-05-25"
+    },
+    "sp500": {
+      "provider_uri": "~/.qlib/qlib_data/us_data",
+      "region": "us",
+      "benchmark": "^gspc",
+      "instrument_list": "sp500",
+      "data_calendar_end": "2026-04-29"
     }
   },
   "metric_convention": {

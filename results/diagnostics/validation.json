@@ -1,8 +1,23 @@
 {
   "passed": true,
-  "passes": 23,
+  "passes": 30,
   "failures": 0,
   "checks": [
+    {
+      "name": "metadata/manifest.json exists",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "manifest schema_version == 1.0",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "all manifest file references resolve",
+      "passed": true,
+      "detail": ""
+    },
     {
       "name": "seed_metrics.csv exists",
       "passed": true,
@@ -117,6 +132,26 @@
       "name": "ensemble table == ensemble detail (within 1e-4)",
       "passed": true,
       "detail": "0 cell mismatches"
+    },
+    {
+      "name": "aggregate_metrics equals seed mean/std",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "seed table equals aggregate metrics (4 decimals)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "seed artifact references are portable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble curves and metrics are reproducible",
+      "passed": true,
+      "detail": ""
     }
   ]
 }

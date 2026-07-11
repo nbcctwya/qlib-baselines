@@ -83,6 +83,8 @@
 
 ## 快速开始
 
+需要让其他 baseline 生成相同结构时，可直接使用 [Baseline Results Protocol Prompt](docs/RESULTS_PROTOCOL_PROMPT.md)。
+
 ```bash
 # 0. 激活环境
 conda activate qlib-env

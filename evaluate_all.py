@@ -40,6 +40,7 @@ Usage:
 import argparse
 import json
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,7 +52,8 @@ from qlib.contrib.evaluate import backtest_daily
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
 from qlib.workflow import R
 
-from configs import MARKETS, MODELS, SEEDS, MLRUNS_DIR, STRATEGY_CONFIG, backtest_config
+from configs import (MARKETS, MODELS, SEEDS, MLRUNS_DIR, PROJECT_ROOT,
+                     STRATEGY_CONFIG, backtest_config)
 from eval_metrics import compute_prediction_metrics, compute_portfolio_metrics
 
 METRIC_COLS = ["IC", "ICIR", "RankIC", "RankICIR", "AR", "STD", "MDD", "Sharpe", "Sortino", "Calmar"]
@@ -61,6 +63,14 @@ PORT_COLS = ["AR", "STD", "MDD", "Sharpe", "Sortino", "Calmar"]
 logger = logging.getLogger("evaluate_all")
 SCHEMA_VERSION = "1.0"
 BASELINE_ID = "qlib_alpha158"
+
+
+def _portable_artifact_ref(path: Path) -> str:
+    """Return a project-relative artifact reference whenever possible."""
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 # --------------------------------------------------------------------------- #
@@ -104,7 +114,7 @@ def evaluate_one(market: str, model: str, seed: int) -> dict:
         row["num_test_days"] = 0
 
     try:
-        row["pred_path_or_ckpt_path"] = str(
+        row["pred_path_or_ckpt_path"] = _portable_artifact_ref(
             Path(MLRUNS_DIR / market) / rec.experiment_id / rec.id / "artifacts" / "pred.pkl")
     except Exception:
         row["pred_path_or_ckpt_path"] = ""
@@ -285,7 +295,7 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
                     seed_preds.append(rec.load_object("pred.pkl"))
                     if label is None:
                         label = rec.load_object("label.pkl")
-                    seed_paths.append(str(
+                    seed_paths.append(_portable_artifact_ref(
                         Path(MLRUNS_DIR / mk) / rec.experiment_id / rec.id / "artifacts" / "pred.pkl"))
                 except Exception as e:
                     logger.warning("  [%s/%s] missing seed%s pred: %s", mk, mdl, s, e)
@@ -331,14 +341,36 @@ def _load_yaml_config(path: str) -> dict:
 
 def record_run_config(out_dir: Path, cli_args) -> dict:
     """Persist the actual backtest config (reused) + eval settings for traceability."""
+    try:
+        git_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        git_commit = None
     cfg = {
+        "baseline": BASELINE_ID,
+        "git_commit": git_commit,
         "note": "Backtest is REUSED from run.py outputs; metrics recomputed with paper convention.",
+        "return_semantics": {
+            "return_field": "gross portfolio simple return before transaction cost",
+            "cost_field": "daily transaction cost rate",
+            "net_formula": "report['return'] - report['cost']; cost is deducted exactly once",
+        },
         "test_period": {"train": ["2009-01-01", "2020-12-31"],
                         "valid": ["2021-01-01", "2022-12-31"],
                         "test": ["2023-01-01", "2025-12-31"]},
         "strategy": {"class": "TopkDropoutStrategy", "topk": STRATEGY_CONFIG["kwargs"]["topk"],
                      "n_drop": STRATEGY_CONFIG["kwargs"]["n_drop"], "weighting": "equal"},
         "cost_by_market": {m: backtest_config(m)["exchange_kwargs"] for m in MARKETS},
+        "data_by_market": {
+            m: {"provider_uri": spec["provider_uri"],
+                "region": spec["region"],
+                "benchmark": spec["benchmark"],
+                "instrument_list": spec["instrument_list"],
+                "data_calendar_end": spec["handler_end"]}
+            for m, spec in MARKETS.items()
+        },
         "metric_convention": {"annualization_factor": 252, "std_ddof": 1, "rf": 0,
                               "sharpe": "sqrt(252)*mean(log(1+r_after_cost))/std",
                               "sortino": "sqrt(252)*mean(g)/sqrt(mean(min(g,0)^2)); daily MAR=0",
