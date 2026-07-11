@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "passes": 24,
+  "passes": 23,
   "failures": 0,
   "checks": [
     {
@@ -117,11 +117,6 @@
       "name": "ensemble table == ensemble detail (within 1e-4)",
       "passed": true,
       "detail": "0 cell mismatches"
-    },
-    {
-      "name": "ensemble IC/RankIC == mean of 5 single-seed values (1e-6)",
-      "passed": true,
-      "detail": "0 mismatches"
     }
   ]
 }

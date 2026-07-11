@@ -16,9 +16,8 @@ Conventions (documented once here):
   * Annualisation factor is **252** (trading days), applied as sqrt(252) for
     ratios and *252 in the exponent for compounded return.
   * Risk-free rate R_f = 0.
-  * `std` uses **ddof=1** (sample standard deviation) everywhere — this is the
-    pandas `Series.std()` default and matches qlib's `calc_ic` ICIR. numpy's
-    default is ddof=0, so we always pass ddof explicitly.
+  * Volatility, Sharpe and ICIR use **ddof=1** (sample standard deviation).
+    Sortino uses the standard RMS downside deviation over all observations.
   * NaN daily IC/RankIC (from days with <2 stocks, all-constant, or missing
     values) are dropped by `.mean()`/`.std()` automatically (skipna=True default).
 """
@@ -82,6 +81,9 @@ def compute_prediction_metrics(pred: pd.Series, label: pd.Series) -> dict:
 def _to_log(daily_ret_after_cost) -> pd.Series:
     """daily simple return (after cost) -> daily log return g_t = log(1+r)."""
     s = pd.Series(daily_ret_after_cost).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    if (s <= -1.0).any():
+        bad = int((s <= -1.0).sum())
+        raise ValueError(f"daily simple return must be > -1; found {bad} invalid value(s)")
     return np.log1p(s)
 
 
@@ -100,10 +102,13 @@ def compute_std(daily_log_ret: pd.Series) -> float:
 
 
 def compute_mdd(daily_log_ret: pd.Series) -> float:
-    """Max drawdown on the log-nav curve. nav = exp(cumsum(g)); returns a <=0 number."""
+    """Max drawdown including the initial NAV=1 observation; returns a <=0 number."""
     if len(daily_log_ret) == 0:
         return np.nan
-    nav = np.exp(daily_log_ret.cumsum())
+    nav = pd.concat([
+        pd.Series([1.0]),
+        np.exp(daily_log_ret.cumsum()).reset_index(drop=True),
+    ], ignore_index=True)
     drawdown = nav / nav.cummax() - 1.0
     return float(drawdown.min())
 
@@ -119,20 +124,18 @@ def compute_log_return_sharpe(daily_log_ret: pd.Series) -> float:
 
 
 def compute_sortino(daily_log_ret: pd.Series) -> float:
-    """Sortino = sqrt(252) * mean(g) / std(negative g, ddof=1).
+    """Sortino using the standard downside deviation with daily MAR=0.
 
-    Downside set = {g_t : g_t < 0} (strictly negative log returns only).
+    downside_deviation = sqrt(mean(min(g_t, 0)^2)), where the mean is over
+    every observation, including zero contributions from non-negative days.
     """
     if len(daily_log_ret) == 0:
         return np.nan
-    neg = daily_log_ret[daily_log_ret < 0]
-    if len(neg) < 2:
-        # No (or too few) down-days -> downside deviation undefined.
+    downside = np.minimum(daily_log_ret.to_numpy(dtype=float), 0.0)
+    downside_deviation = float(np.sqrt(np.mean(np.square(downside))))
+    if downside_deviation == 0:
         return np.nan
-    dd = neg.std(ddof=1)
-    if not dd or dd == 0:
-        return np.nan
-    return float(np.sqrt(ANN_FACTOR) * daily_log_ret.mean() / dd)
+    return float(np.sqrt(ANN_FACTOR) * daily_log_ret.mean() / downside_deviation)
 
 
 def compute_calmar(ar: float, mdd: float) -> float:

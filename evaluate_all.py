@@ -18,8 +18,8 @@ into results/metadata/eval_config.json for traceability.
 Optional seed-ENSEMBLE evaluation (--ensemble): for each (market, model), average
 the 5 seeds' pred scores (inner join by default) into one ensemble score, re-run
 the SAME TopK-DropN backtest on it, and compute AR/STD/MDD/Sharpe/Sortino/Calmar.
-The ensemble's IC/ICIR/RankIC/RankICIR are the MEAN of the 5 single-seed values
-(same convention as the main table), NOT recomputed on the ensemble score.
+The ensemble's IC/ICIR/RankIC/RankICIR are recomputed directly from the
+ensemble score and the aligned test label.
 
 Outputs (under <out>/, default results/):
   metrics/seed_metrics.csv       one row per (market, model, seed)
@@ -197,11 +197,11 @@ def build_ensemble_score(seed_preds, normalize: str = "none", join: str = "inner
 
 
 def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
-                          ic_means: dict, normalize: str, join: str,
+                          label, normalize: str, join: str,
                           save_nav_dir: "Path | None" = None) -> dict:
     """Backtest the ensemble score and compute portfolio metrics.
 
-    ic_means: {IC,ICIR,RankIC,RankICIR} = mean of the 5 single-seed values.
+    Ranking metrics are recomputed from the ensemble score and ``label``.
     Backtest uses the SAME TopK-DropN + exchange/cost config as single seed
     (configs.backtest_config(market)), so conventions are identical.
 
@@ -241,9 +241,7 @@ def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
             "bench_ret": report["bench"].values,
         }, index=report.index)
         nav["nav"] = (1.0 + nav["daily_ret_net"]).cumprod()
-        nav["nav"] = nav["nav"] / nav["nav"].iloc[0]            # normalize start to 1.0
         nav["bench_nav"] = (1.0 + nav["bench_ret"]).cumprod()
-        nav["bench_nav"] = nav["bench_nav"] / nav["bench_nav"].iloc[0]
         nav.index.name = "datetime"
         save_nav_dir.mkdir(parents=True, exist_ok=True)
         nav_path = save_nav_dir / f"{market}_{model}.csv"
@@ -255,7 +253,7 @@ def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
     port = compute_portfolio_metrics(report["return"] - report["cost"])
 
     row = {"market": market, "model": model, "ensemble_method": f"avg_{normalize}"}
-    row.update({k: ic_means[k] for k in IC_COLS})       # ranking metrics: mean of 5 seeds
+    row.update(compute_prediction_metrics(ensemble, label))
     row.update({k: port[k] for k in PORT_COLS})          # backtest metrics: ensemble backtest
     row["num_test_days"] = port["num_test_days"]
     row["seeds"] = ",".join(str(s) for s in SEEDS)
@@ -277,16 +275,16 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
         R.set_uri(f"file:{(MLRUNS_DIR / mk).resolve()}")
         logger.info("\n=== ensemble market: %s (normalize=%s, join=%s) ===",
                     mk, args.ensemble_normalize, args.ensemble_join)
-        ic_mean_by_model = (detail[detail["market"] == mk]
-                            .groupby("model")[IC_COLS].mean())
         for mdl in args.models:
             if mdl not in MODELS:
                 continue
-            seed_preds, seed_paths = [], []
+            seed_preds, seed_paths, label = [], [], None
             for s in args.seeds:
                 try:
                     rec = R.get_recorder(experiment_name=f"{mk}_{mdl}_seed{s}")
                     seed_preds.append(rec.load_object("pred.pkl"))
+                    if label is None:
+                        label = rec.load_object("label.pkl")
                     seed_paths.append(str(
                         Path(MLRUNS_DIR / mk) / rec.experiment_id / rec.id / "artifacts" / "pred.pkl"))
                 except Exception as e:
@@ -295,9 +293,7 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
                 logger.warning("  [%s/%s] SKIP ensemble (need >=2 seed preds, got %d)", mk, mdl, len(seed_preds))
                 continue
             try:
-                icm = ic_mean_by_model.loc[mdl].to_dict() if mdl in ic_mean_by_model.index else \
-                    {k: np.nan for k in IC_COLS}
-                row = evaluate_ensemble_one(mk, mdl, seed_preds, seed_paths, icm,
+                row = evaluate_ensemble_one(mk, mdl, seed_preds, seed_paths, label,
                                             args.ensemble_normalize, args.ensemble_join,
                                             save_nav_dir=out_dir / "curves" / "ensemble")
                 ens_rows.append(row)
@@ -345,15 +341,15 @@ def record_run_config(out_dir: Path, cli_args) -> dict:
         "cost_by_market": {m: backtest_config(m)["exchange_kwargs"] for m in MARKETS},
         "metric_convention": {"annualization_factor": 252, "std_ddof": 1, "rf": 0,
                               "sharpe": "sqrt(252)*mean(log(1+r_after_cost))/std",
-                              "sortino": "sqrt(252)*mean(g)/std(negative g)",
+                              "sortino": "sqrt(252)*mean(g)/sqrt(mean(min(g,0)^2)); daily MAR=0",
                               "AR": "exp(mean(g)*252)-1", "STD": "std(g)*sqrt(252)",
-                              "MDD": "min(nav/cummax-1), nav=exp(cumsum(g))",
+                              "MDD": "min(nav/cummax-1), nav=[1, exp(cumsum(g))]",
                               "Calmar": "AR/abs(MDD)"},
         "ensemble": {
             "enabled": bool(getattr(cli_args, "ensemble", False)),
             "normalize": getattr(cli_args, "ensemble_normalize", "none"),
             "join": getattr(cli_args, "ensemble_join", "inner"),
-            "ranking_metrics": "mean of the single-seed values (from metrics/seed_metrics.csv)",
+            "ranking_metrics": "recomputed from the ensemble score and aligned test label",
             "backtest": "TopkDropoutStrategy on the ensemble score; same TopK/DropN/cost as single seed",
             "score_formula": "mean(score_seed0..4); optional per-day cross-sectional zscore (ddof=0) or rank-pct",
         },

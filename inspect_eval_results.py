@@ -4,8 +4,8 @@ Two stages:
   1. Single-seed checks on metrics/seed_metrics.csv (range/sanity of every metric).
   2. Ensemble checks on metrics/ensemble_metrics.csv + tables/ensemble.csv, only
      if those files exist. Verifies row counts, ranges, table-vs-detail
-     consistency, and that ensemble IC/RankIC equal the mean of the 5 single-seed
-     values in metrics/seed_metrics.csv.
+     consistency. Ensemble ranking metrics are recomputed from ensemble scores
+     by evaluate_all.py rather than inferred from single-seed aggregates.
 
 Exit code 0 only if every check passes.
 
@@ -82,8 +82,7 @@ def check_single_seed(r: Reporter, path: Path, markets, models, seeds):
         r.check(f"{desc} (per row)", bad == 0, f"{bad} rows violate" if bad else "")
 
 
-def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
-                   single_path: Path, markets, models):
+def check_ensemble(r: Reporter, detail_path: Path, table_path: Path, markets, models):
     print("\n=== ensemble: metrics/ensemble_metrics.csv / tables/ensemble.csv ===")
     if not detail_path.exists():
         r.check("ensemble_metrics.csv exists (run `evaluate_all.py --ensemble`)", False, str(detail_path))
@@ -128,25 +127,6 @@ def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
     else:
         r.check("tables/ensemble.csv exists", False)
 
-    # ensemble IC / RankIC == mean of 5 single-seed values
-    if single_path.exists():
-        sdf = pd.read_csv(single_path)
-        means = sdf.groupby(["market", "model"])[["IC", "RankIC"]].mean()
-        bad = 0
-        for _, drow in det.iterrows():
-            key = (drow["market"], drow["model"])
-            if key not in means.index:
-                bad += 1; continue
-            for col in ["IC", "RankIC"]:
-                if abs(float(drow[col]) - float(means.loc[key, col])) > 1e-6:
-                    bad += 1
-        r.check("ensemble IC/RankIC == mean of 5 single-seed values (1e-6)", bad == 0,
-                f"{bad} mismatches")
-    else:
-        r.check("seed_metrics.csv available for IC-mean cross-check", False,
-                "metrics/seed_metrics.csv missing")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results-dir", default="results")
@@ -162,7 +142,7 @@ def main():
     check_single_seed(r, seed_path, args.markets, args.models, args.seeds)
     single_ok_for_ensemble = seed_path.exists()
     check_ensemble(r, ensemble_path, d / "tables" / "ensemble.csv",
-                   seed_path, args.markets, args.models)
+                   args.markets, args.models)
 
     print(f"\n=== summary: {r.passes} passed, {r.fails} failed ===")
     if r.fails == 0:

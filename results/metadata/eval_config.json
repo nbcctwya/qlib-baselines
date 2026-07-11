@@ -41,17 +41,17 @@
     "std_ddof": 1,
     "rf": 0,
     "sharpe": "sqrt(252)*mean(log(1+r_after_cost))/std",
-    "sortino": "sqrt(252)*mean(g)/std(negative g)",
+    "sortino": "sqrt(252)*mean(g)/sqrt(mean(min(g,0)^2)); daily MAR=0",
     "AR": "exp(mean(g)*252)-1",
     "STD": "std(g)*sqrt(252)",
-    "MDD": "min(nav/cummax-1), nav=exp(cumsum(g))",
+    "MDD": "min(nav/cummax-1), nav=[1, exp(cumsum(g))]",
     "Calmar": "AR/abs(MDD)"
   },
   "ensemble": {
     "enabled": true,
     "normalize": "none",
     "join": "inner",
-    "ranking_metrics": "mean of the 5 single-seed values (from eval_detail.csv)",
+    "ranking_metrics": "recomputed from the ensemble score and aligned test label",
     "backtest": "TopkDropoutStrategy on the ensemble score; same TopK/DropN/cost as single seed",
     "score_formula": "mean(score_seed0..4); optional per-day cross-sectional zscore (ddof=0) or rank-pct"
   },
