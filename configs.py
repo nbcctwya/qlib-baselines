@@ -90,7 +90,17 @@ LABEL = ["Ref($close, -2) / Ref($close, -1) - 1"]
 STRATEGY_CONFIG = {
     "class": "TopkDropoutStrategy",
     "module_path": "qlib.contrib.strategy.signal_strategy",
-    "kwargs": {"signal": "<PRED>", "topk": 30, "n_drop": 5},
+    "kwargs": {
+        "signal": "<PRED>",
+        "topk": 30,
+        "n_drop": 5,
+        "method_sell": "bottom",
+        "method_buy": "top",
+        "hold_thresh": 1,
+        "only_tradable": False,
+        "forbid_all_trade_at_limit": True,
+        "risk_degree": 0.95,
+    },
 }
 
 

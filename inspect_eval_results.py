@@ -147,6 +147,24 @@ def check_manifest(r: Reporter, results_dir: Path):
     except (OSError, ValueError, TypeError) as exc:
         r.check("manifest is valid JSON", False, str(exc))
 
+    config_path = results_dir / "metadata" / "eval_config.json"
+    try:
+        cfg = json.loads(config_path.read_text())
+        strategy = cfg["strategy"]
+        expected = {
+            "class": "TopkDropoutStrategy", "topk": 30, "n_drop": 5,
+            "method_sell": "bottom", "method_buy": "top", "hold_thresh": 1,
+            "only_tradable": False, "forbid_all_trade_at_limit": True,
+            "risk_degree": 0.95,
+        }
+        ok = all(strategy.get(key) == value for key, value in expected.items())
+        ok = ok and cfg.get("account") == 100000000
+        timing = cfg.get("signal_timing", {})
+        ok = ok and timing.get("signal_date") == "t-1" and timing.get("trade_date") == "t"
+        r.check("standard TopKDropN backtest config is fixed", ok)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        r.check("standard TopKDropN backtest config is fixed", False, str(exc))
+
 
 def check_aggregate(r: Reporter, results_dir: Path):
     seed_path = results_dir / "metrics" / "seed_metrics.csv"

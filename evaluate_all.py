@@ -236,6 +236,12 @@ def evaluate_ensemble_one(market: str, model: str, seed_preds, seed_paths,
         signal=ensemble,
         topk=STRATEGY_CONFIG["kwargs"]["topk"],
         n_drop=STRATEGY_CONFIG["kwargs"]["n_drop"],
+        method_sell=STRATEGY_CONFIG["kwargs"]["method_sell"],
+        method_buy=STRATEGY_CONFIG["kwargs"]["method_buy"],
+        hold_thresh=STRATEGY_CONFIG["kwargs"]["hold_thresh"],
+        only_tradable=STRATEGY_CONFIG["kwargs"]["only_tradable"],
+        forbid_all_trade_at_limit=STRATEGY_CONFIG["kwargs"]["forbid_all_trade_at_limit"],
+        risk_degree=STRATEGY_CONFIG["kwargs"]["risk_degree"],
     )
     report, _ = backtest_daily(
         start_time=bt["start_time"], end_time=bt["end_time"],
@@ -357,11 +363,23 @@ def record_run_config(out_dir: Path, cli_args) -> dict:
             "cost_field": "daily transaction cost rate",
             "net_formula": "report['return'] - report['cost']; cost is deducted exactly once",
         },
+        "account": 100000000,
+        "signal_timing": {
+            "signal_date": "t-1", "trade_date": "t", "qlib_shift": 1,
+            "note": "Qlib TopkDropoutStrategy default timing; adapter applies no extra shift",
+        },
+        "label_alignment": {
+            "expression": "Ref($close, -2) / Ref($close, -1) - 1",
+            "meaning": "at signal date t, predict close(t+2)/close(t+1)-1",
+            "processor_fit_period": ["2009-01-01", "2020-12-31"],
+            "leakage_guard": "feature normalization is fitted on train only",
+        },
         "test_period": {"train": ["2009-01-01", "2020-12-31"],
                         "valid": ["2021-01-01", "2022-12-31"],
                         "test": ["2023-01-01", "2025-12-31"]},
-        "strategy": {"class": "TopkDropoutStrategy", "topk": STRATEGY_CONFIG["kwargs"]["topk"],
-                     "n_drop": STRATEGY_CONFIG["kwargs"]["n_drop"], "weighting": "equal"},
+        "strategy": {"class": "TopkDropoutStrategy", **{
+            key: value for key, value in STRATEGY_CONFIG["kwargs"].items() if key != "signal"
+        }},
         "cost_by_market": {m: backtest_config(m)["exchange_kwargs"] for m in MARKETS},
         "data_by_market": {
             m: {"provider_uri": spec["provider_uri"],

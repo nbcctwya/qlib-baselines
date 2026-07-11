@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "passes": 30,
+  "passes": 31,
   "failures": 0,
   "checks": [
     {
@@ -15,6 +15,11 @@
     },
     {
       "name": "all manifest file references resolve",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "standard TopKDropN backtest config is fixed",
       "passed": true,
       "detail": ""
     },
