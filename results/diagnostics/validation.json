@@ -1,0 +1,127 @@
+{
+  "passed": true,
+  "passes": 24,
+  "failures": 0,
+  "checks": [
+    {
+      "name": "seed_metrics.csv exists",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "row count == 40 (markets x models x seeds)",
+      "passed": true,
+      "detail": "got 40 rows, 40 of 40 expected combos"
+    },
+    {
+      "name": "no NaN/Inf in metrics",
+      "passed": true,
+      "detail": "0 bad cells"
+    },
+    {
+      "name": "MDD <= 0 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "STD >= 0 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "|IC| <= 1 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "|RankIC| <= 1 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "|Sharpe| <= 5 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "|Sortino| <= 10 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "|Calmar| <= 10 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble_metrics.csv exists",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble detail row count == 8 (markets x models)",
+      "passed": true,
+      "detail": "got 8 rows"
+    },
+    {
+      "name": "exactly one row per (market, model)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "no NaN/Inf in ensemble metrics",
+      "passed": true,
+      "detail": "0 bad cells"
+    },
+    {
+      "name": "ensemble MDD <= 0 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble STD >= 0 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble |IC| <= 1 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble |RankIC| <= 1 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble |Sharpe| <= 5 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble |Sortino| <= 10 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble |Calmar| <= 10 (per row)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "tables/ensemble.csv exists",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "ensemble table == ensemble detail (within 1e-4)",
+      "passed": true,
+      "detail": "0 cell mismatches"
+    },
+    {
+      "name": "ensemble IC/RankIC == mean of 5 single-seed values (1e-6)",
+      "passed": true,
+      "detail": "0 mismatches"
+    }
+  ]
+}

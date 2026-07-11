@@ -13,7 +13,7 @@ and computes:
 The TopK-DropN backtest (K=30, N=5, buy 5bps / sell 15bps) is REUSED from run.py -
 this script only recomputes metrics with the paper convention, it does NOT
 re-backtest. The actual backtest parameters are read from configs.py and recorded
-into results/eval_run_config.json for traceability.
+into results/metadata/eval_config.json for traceability.
 
 Optional seed-ENSEMBLE evaluation (--ensemble): for each (market, model), average
 the 5 seeds' pred scores (inner join by default) into one ensemble score, re-run
@@ -22,12 +22,14 @@ The ensemble's IC/ICIR/RankIC/RankICIR are the MEAN of the 5 single-seed values
 (same convention as the main table), NOT recomputed on the ensemble score.
 
 Outputs (under <out>/, default results/):
-  eval_detail.csv           one row per (market, model, seed)
-  eval_summary.csv          mean & std across seeds, one row per (market, model)
-  eval_table.csv            paper-friendly "mean +/- std" strings
-  eval_ensemble_detail.csv  (--ensemble) one row per (market, model)
-  eval_ensemble_table.csv   (--ensemble) paper-friendly, 4-decimal, no mean/std
-  eval_run_config.json      recorded backtest/eval/ensemble config
+  metrics/seed_metrics.csv       one row per (market, model, seed)
+  metrics/aggregate_metrics.csv  mean & std across seeds, one row per (market, model)
+  metrics/ensemble_metrics.csv   (--ensemble) one row per (market, model)
+  tables/seed_mean_std.csv       paper-friendly "mean +/- std" strings
+  tables/ensemble.csv            (--ensemble) paper-friendly, 4-decimal
+  curves/ensemble/*.csv          (--ensemble) daily return and NAV series
+  metadata/eval_config.json      recorded evaluation configuration
+  metadata/manifest.json         result schema and file inventory
 
 Usage:
     python evaluate_all.py                                # all markets x models x seeds
@@ -57,6 +59,8 @@ IC_COLS = ["IC", "ICIR", "RankIC", "RankICIR"]
 PORT_COLS = ["AR", "STD", "MDD", "Sharpe", "Sortino", "Calmar"]
 
 logger = logging.getLogger("evaluate_all")
+SCHEMA_VERSION = "1.0"
+BASELINE_ID = "qlib_alpha158"
 
 
 # --------------------------------------------------------------------------- #
@@ -295,7 +299,7 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
                     {k: np.nan for k in IC_COLS}
                 row = evaluate_ensemble_one(mk, mdl, seed_preds, seed_paths, icm,
                                             args.ensemble_normalize, args.ensemble_join,
-                                            save_nav_dir=out_dir / "ensemble_nav")
+                                            save_nav_dir=out_dir / "curves" / "ensemble")
                 ens_rows.append(row)
                 logger.info("  [%s/%s] ensemble IC=%.4f AR=%.4f Sharpe=%.4f Calmar=%.4f",
                             mk, mdl, row["IC"], row["AR"], row["Sharpe"], row["Calmar"])
@@ -307,13 +311,13 @@ def run_ensemble(detail: pd.DataFrame, args, out_dir: Path):
                    + ["num_test_days", "seeds", "pred_paths"])
     if len(ens_detail):
         ens_detail = ens_detail[[c for c in detail_cols if c in ens_detail.columns]]
-    ens_detail.to_csv(out_dir / "eval_ensemble_detail.csv", index=False)
+    ens_detail.to_csv(out_dir / "metrics" / "ensemble_metrics.csv", index=False)
 
     table_cols = ["market", "model", "ensemble_method"] + IC_COLS + PORT_COLS
     ens_table = ens_detail[[c for c in table_cols if c in ens_detail.columns]].copy()
     for c in [c for c in table_cols if c not in ("market", "model", "ensemble_method")]:
         ens_table[c] = ens_table[c].map(lambda v: "nan" if pd.isna(v) else f"{v:.4f}")
-    ens_table.to_csv(out_dir / "eval_ensemble_table.csv", index=False)
+    ens_table.to_csv(out_dir / "tables" / "ensemble.csv", index=False)
     return ens_detail, ens_table
 
 
@@ -349,14 +353,43 @@ def record_run_config(out_dir: Path, cli_args) -> dict:
             "enabled": bool(getattr(cli_args, "ensemble", False)),
             "normalize": getattr(cli_args, "ensemble_normalize", "none"),
             "join": getattr(cli_args, "ensemble_join", "inner"),
-            "ranking_metrics": "mean of the 5 single-seed values (from eval_detail.csv)",
+            "ranking_metrics": "mean of the single-seed values (from metrics/seed_metrics.csv)",
             "backtest": "TopkDropoutStrategy on the ensemble score; same TopK/DropN/cost as single seed",
             "score_formula": "mean(score_seed0..4); optional per-day cross-sectional zscore (ddof=0) or rank-pct",
         },
         "evaluated": {"markets": cli_args.markets, "models": cli_args.models, "seeds": cli_args.seeds},
     }
-    (out_dir / "eval_run_config.json").write_text(json.dumps(cfg, indent=2))
+    (out_dir / "metadata" / "eval_config.json").write_text(json.dumps(cfg, indent=2) + "\n")
     return cfg
+
+
+def write_manifest(out_dir: Path, cli_args) -> None:
+    """Write a stable, machine-readable description of the result bundle."""
+    files = {
+        "seed_metrics": "metrics/seed_metrics.csv",
+        "aggregate_metrics": "metrics/aggregate_metrics.csv",
+        "seed_table": "tables/seed_mean_std.csv",
+        "eval_config": "metadata/eval_config.json",
+        "validation": "diagnostics/validation.json",
+    }
+    if cli_args.ensemble:
+        files.update({
+            "ensemble_metrics": "metrics/ensemble_metrics.csv",
+            "ensemble_table": "tables/ensemble.csv",
+            "ensemble_curves": "curves/ensemble/*.csv",
+        })
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "baseline": BASELINE_ID,
+        "description": "Qlib Alpha158 baseline evaluation result bundle",
+        "primary_keys": {
+            "seed_metrics": ["market", "model", "seed"],
+            "aggregate_metrics": ["market", "model"],
+            "ensemble_metrics": ["market", "model", "ensemble_method"],
+        },
+        "files": files,
+    }
+    (out_dir / "metadata" / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 def main():
@@ -371,7 +404,7 @@ def main():
     ap.add_argument("--topk", type=int, default=STRATEGY_CONFIG["kwargs"]["topk"])
     ap.add_argument("--dropn", type=int, default=STRATEGY_CONFIG["kwargs"]["n_drop"])
     ap.add_argument("--ensemble", action="store_true",
-                    help="also run seed-ensemble evaluation -> eval_ensemble_*.csv")
+                    help="also run seed-ensemble evaluation -> metrics/, tables/, curves/")
     ap.add_argument("--ensemble-normalize", choices=["none", "zscore", "rank"], default="none",
                     help="per-day cross-sectional normalization before averaging seed scores")
     ap.add_argument("--ensemble-join", choices=["inner", "outer"], default="inner",
@@ -386,7 +419,8 @@ def main():
         args.out = cfg.get("out", args.out)
 
     out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    for subdir in ("metrics", "tables", "curves", "metadata", "diagnostics"):
+        (out_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     if args.topk != STRATEGY_CONFIG["kwargs"]["topk"] or args.dropn != STRATEGY_CONFIG["kwargs"]["n_drop"]:
         logger.warning("NOTE: --topk/--dropn (%s/%s) differ from the REUSED backtest (%s/%s); "
@@ -414,30 +448,30 @@ def main():
     detail = pd.DataFrame(rows)
     detail_cols = ["market", "model", "seed"] + METRIC_COLS + ["num_test_days", "pred_path_or_ckpt_path"]
     detail = detail[[c for c in detail_cols if c in detail.columns]]
-    detail.to_csv(out_dir / "eval_detail.csv", index=False)
+    detail.to_csv(out_dir / "metrics" / "seed_metrics.csv", index=False)
 
     summary = summarize(detail)
-    summary.to_csv(out_dir / "eval_summary.csv")
+    summary.to_csv(out_dir / "metrics" / "aggregate_metrics.csv")
     table = to_paper_table(summary)
-    table.to_csv(out_dir / "eval_table.csv", index=False)
+    table.to_csv(out_dir / "tables" / "seed_mean_std.csv", index=False)
 
-    logger.info("\n=== %s/eval_detail.csv (%d rows) ===", out_dir, len(detail))
+    logger.info("\n=== %s/metrics/seed_metrics.csv (%d rows) ===", out_dir, len(detail))
     with pd.option_context("display.float_format", lambda v: f"{v:.4f}"):
         print(detail.drop(columns=["pred_path_or_ckpt_path"]).to_string(index=False))
-    logger.info("\n=== %s/eval_table.csv (mean +/- std) ===", out_dir)
+    logger.info("\n=== %s/tables/seed_mean_std.csv (mean +/- std) ===", out_dir)
     print(table.to_string(index=False))
 
     # ---- ensemble pass (additive, separate output files) ----
     if args.ensemble:
         ens_detail, ens_table = run_ensemble(detail, args, out_dir)
-        logger.info("\n=== %s/eval_ensemble_detail.csv (%d rows) ===", out_dir, len(ens_detail))
+        logger.info("\n=== %s/metrics/ensemble_metrics.csv (%d rows) ===", out_dir, len(ens_detail))
         with pd.option_context("display.float_format", lambda v: f"{v:.4f}"):
             print(ens_detail.drop(columns=["pred_paths"]).to_string(index=False))
-        logger.info("\n=== %s/eval_ensemble_table.csv ===", out_dir)
+        logger.info("\n=== %s/tables/ensemble.csv ===", out_dir)
         print(ens_table.to_string(index=False))
 
-    logger.info("\noutputs: %s/{eval_detail,eval_summary,eval_table}.csv%s + eval_run_config.json",
-                out_dir, ", eval_ensemble_{detail,table}.csv" if args.ensemble else "")
+    write_manifest(out_dir, args)
+    logger.info("\noutputs: %s/{metrics,tables,curves,metadata,diagnostics}", out_dir)
 
 
 if __name__ == "__main__":

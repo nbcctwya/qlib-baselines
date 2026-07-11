@@ -1,11 +1,11 @@
 """Sanity-check the evaluation outputs in results/.
 
 Two stages:
-  1. Single-seed checks on eval_detail.csv (range/sanity of every metric).
-  2. Ensemble checks on eval_ensemble_detail.csv + eval_ensemble_table.csv, only
+  1. Single-seed checks on metrics/seed_metrics.csv (range/sanity of every metric).
+  2. Ensemble checks on metrics/ensemble_metrics.csv + tables/ensemble.csv, only
      if those files exist. Verifies row counts, ranges, table-vs-detail
      consistency, and that ensemble IC/RankIC equal the mean of the 5 single-seed
-     values in eval_detail.csv.
+     values in metrics/seed_metrics.csv.
 
 Exit code 0 only if every check passes.
 
@@ -14,6 +14,7 @@ Usage:
     python inspect_eval_results.py --results-dir results
 """
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -38,6 +39,7 @@ class Reporter:
     def __init__(self):
         self.fails = 0
         self.passes = 0
+        self.checks = []
 
     def check(self, name: str, ok: bool, detail: str = ""):
         tag = "PASS" if ok else "FAIL"
@@ -46,6 +48,7 @@ class Reporter:
             self.passes += 1
         else:
             self.fails += 1
+        self.checks.append({"name": name, "passed": bool(ok), "detail": detail})
 
     def all_ok(self):
         return self.fails == 0
@@ -56,12 +59,12 @@ def _expected_combos(markets, models, seeds):
 
 
 def check_single_seed(r: Reporter, path: Path, markets, models, seeds):
-    print("\n=== single-seed: eval_detail.csv ===")
+    print("\n=== single-seed: metrics/seed_metrics.csv ===")
     if not path.exists():
-        r.check("eval_detail.csv exists", False, str(path))
+        r.check("seed_metrics.csv exists", False, str(path))
         return
     df = pd.read_csv(path)
-    r.check("eval_detail.csv exists", True)
+    r.check("seed_metrics.csv exists", True)
 
     expected = _expected_combos(markets, models, seeds)
     got = set(map(tuple, df[["market", "model", "seed"]].values.tolist()))
@@ -81,11 +84,11 @@ def check_single_seed(r: Reporter, path: Path, markets, models, seeds):
 
 def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
                    single_path: Path, markets, models):
-    print("\n=== ensemble: eval_ensemble_detail.csv / eval_ensemble_table.csv ===")
+    print("\n=== ensemble: metrics/ensemble_metrics.csv / tables/ensemble.csv ===")
     if not detail_path.exists():
-        r.check("eval_ensemble_detail.csv exists (run `evaluate_all.py --ensemble`)", False, str(detail_path))
+        r.check("ensemble_metrics.csv exists (run `evaluate_all.py --ensemble`)", False, str(detail_path))
         return
-    r.check("eval_ensemble_detail.csv exists", True)
+    r.check("ensemble_metrics.csv exists", True)
 
     det = pd.read_csv(detail_path)
     expected_pairs = {(m, mdl) for m in markets for mdl in models}
@@ -107,7 +110,7 @@ def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
     # table-vs-detail consistency
     if table_path.exists():
         tbl = pd.read_csv(table_path)
-        r.check("eval_ensemble_table.csv exists", True)
+        r.check("tables/ensemble.csv exists", True)
         mismatches = 0
         for _, trow in tbl.iterrows():
             drow = det[(det["market"] == trow["market"]) & (det["model"] == trow["model"])]
@@ -123,7 +126,7 @@ def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
         r.check("ensemble table == ensemble detail (within 1e-4)", mismatches == 0,
                 f"{mismatches} cell mismatches")
     else:
-        r.check("eval_ensemble_table.csv exists", False)
+        r.check("tables/ensemble.csv exists", False)
 
     # ensemble IC / RankIC == mean of 5 single-seed values
     if single_path.exists():
@@ -140,8 +143,8 @@ def check_ensemble(r: Reporter, detail_path: Path, table_path: Path,
         r.check("ensemble IC/RankIC == mean of 5 single-seed values (1e-6)", bad == 0,
                 f"{bad} mismatches")
     else:
-        r.check("eval_detail.csv available for IC-mean cross-check", False,
-                "eval_detail.csv missing")
+        r.check("seed_metrics.csv available for IC-mean cross-check", False,
+                "metrics/seed_metrics.csv missing")
 
 
 def main():
@@ -154,16 +157,23 @@ def main():
 
     d = Path(args.results_dir)
     r = Reporter()
-    check_single_seed(r, d / "eval_detail.csv", args.markets, args.models, args.seeds)
-    single_ok_for_ensemble = (d / "eval_detail.csv").exists()
-    check_ensemble(r, d / "eval_ensemble_detail.csv", d / "eval_ensemble_table.csv",
-                   d / "eval_detail.csv", args.markets, args.models)
+    seed_path = d / "metrics" / "seed_metrics.csv"
+    ensemble_path = d / "metrics" / "ensemble_metrics.csv"
+    check_single_seed(r, seed_path, args.markets, args.models, args.seeds)
+    single_ok_for_ensemble = seed_path.exists()
+    check_ensemble(r, ensemble_path, d / "tables" / "ensemble.csv",
+                   seed_path, args.markets, args.models)
 
     print(f"\n=== summary: {r.passes} passed, {r.fails} failed ===")
     if r.fails == 0:
         print("All single-seed evaluation checks passed.")
-        if single_ok_for_ensemble and (d / "eval_ensemble_detail.csv").exists():
+        if single_ok_for_ensemble and ensemble_path.exists():
             print("All ensemble evaluation checks passed.")
+    diagnostics = d / "diagnostics"
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    report = {"passed": r.all_ok(), "passes": r.passes, "failures": r.fails,
+              "checks": r.checks}
+    (diagnostics / "validation.json").write_text(json.dumps(report, indent=2) + "\n")
     sys.exit(0 if r.all_ok() else 1)
 
 

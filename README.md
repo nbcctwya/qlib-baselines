@@ -33,7 +33,7 @@
 | `run.py` | 加载缓存 handler → 遍历 4 模型 × 2 市场 × 5 seed → 训练 / 预测 / 回测（走 qlib workflow，结果存 MLflow）。seed 在运行时注入到每个模型。 | `python run.py`（全量 40 个实验）；`python run.py --markets csi300 --models XGBoost --smoke`（冒烟） |
 | `collect_results.py` | **qlib 口径**聚合：读 MLflow 产物，用 qlib `risk_analysis`（sum 模式 ×238）算指标，输出 `reports/*.csv` + 柱状图。 | `python collect_results.py` |
 | `eval_metrics.py` | **论文口径**纯指标函数库：IC 类（复用 qlib `calc_ic`，ddof=1）+ 组合指标（log 收益、√252，ddof=1）。只提供函数，不直接运行。 | 被 `evaluate_all.py` 调用。 |
-| `evaluate_all.py` | **论文口径**统一评估入口：遍历 market×model×seed，输出 `results/eval_*.csv`；`--ensemble` 额外做 seed ensemble 评估。 | `python evaluate_all.py`；`python evaluate_all.py --ensemble` |
+| `evaluate_all.py` | **论文口径**统一评估入口：遍历 market×model×seed，按 `metrics/tables/curves/metadata` 分层输出；`--ensemble` 额外做 seed ensemble 评估。 | `python evaluate_all.py`；`python evaluate_all.py --ensemble` |
 | `inspect_eval_results.py` | 结果体检：检查单 seed 与 ensemble 输出的行数、NaN/Inf、取值范围、table==detail、ensemble IC==5-seed 均值等。 | `python inspect_eval_results.py` |
 
 > checkpoint 位置：每个 (market,model,seed) 是一个 MLflow 实验 `{market}_{model}_seed{N}`，模型存在 `mlruns/<market>/<exp_id>/<run_id>/artifacts/trained_model.pkl`，用 `R.get_recorder(experiment_name=...).load_object("trained_model.pkl")` 加载。
@@ -66,12 +66,15 @@
 
 | 文件 | 行数 | 内容 |
 |---|---|---|
-| `eval_detail.csv` | 40 | 单 seed 明细，每行一个 (market,model,seed)，含 `num_test_days` 和 `pred_path_or_ckpt_path` |
-| `eval_summary.csv` | 8 | 每个 (market,model) 一行，每个指标拆成 `_mean`/`_std` 两列 |
-| `eval_table.csv` | 8 | 论文友好格式，单元格 `mean ± std` |
-| `eval_ensemble_detail.csv` | 8 | **seed ensemble** 明细（`--ensemble` 产出），含 `ensemble_method`/`seeds`/`pred_paths` |
-| `eval_ensemble_table.csv` | 8 | ensemble 论文格式（4 位小数，无 mean±std） |
-| `eval_run_config.json` | — | 回测参数（TopK/DropN/费率）+ 指标口径 + ensemble 配置，可追溯 |
+| `metrics/seed_metrics.csv` | 40 | 核心单 seed 数值，每行一个 (market,model,seed) |
+| `metrics/aggregate_metrics.csv` | 8 | 每个 (market,model) 的 `_mean`/`_std` 数值列 |
+| `metrics/ensemble_metrics.csv` | 8 | **seed ensemble** 的完整数值结果 |
+| `tables/seed_mean_std.csv` | 8 | 论文展示格式，单元格 `mean ± std` |
+| `tables/ensemble.csv` | 8 | ensemble 展示格式（4 位小数） |
+| `curves/ensemble/*.csv` | 8 份 | ensemble 的逐日收益、成本、策略净值和基准净值 |
+| `metadata/eval_config.json` | — | 回测参数、指标口径和 ensemble 配置 |
+| `metadata/manifest.json` | — | schema 版本、baseline 身份、主键和文件清单；跨 baseline 读取入口 |
+| `diagnostics/validation.json` | — | `inspect_eval_results.py` 写出的机器可读检查报告 |
 
 列：`IC, ICIR, RankIC, RankICIR, AR, STD, MDD, Sharpe, Sortino, Calmar`。
 - `AR=exp(mean(g)·252)−1`、`STD=std(g)·√252`、`MDD`（累计净值最大回撤）、`Sharpe=√252·mean(g)/std(g)`、`Sortino=√252·mean(g)/std(负收益)`、`Calmar=AR/abs(MDD)`，`g=log(1+日收益_after_cost)`，`日收益_after_cost = report["return"] − report["cost"]`。
@@ -119,8 +122,10 @@ python inspect_eval_results.py   # 全部通过时输出 "All ... checks passed.
 两套并存的原因：`collect_results.py` 先写（qlib 标准报表口径），后来按论文公式评估时**没有覆盖旧逻辑**，而是新增 `evaluate_all.py`。选用建议：
 
 - **对标 qlib benchmark / 看是否跑赢指数** → `reports/`（看 `AnnExcess_Net`）。
-- **贴进论文表格（AR/STD/MDD/Sharpe/Sortino/Calmar）** → `results/`。
-- **看 5 seed 平均打分的组合表现** → `results/eval_ensemble_*.csv`。
+- **继续计算或跨 baseline 合并** → `results/metrics/`。
+- **贴进论文表格** → `results/tables/`。
+- **画 ensemble 净值图** → `results/curves/ensemble/`。
+- **追溯口径与自动发现文件** → `results/metadata/manifest.json`。
 
 > 注意：`results/` 的 Sharpe 是**组合自身净收益**口径（牛市里会偏正）；`reports/` 的 Sharpe 是**超额收益信息比**（能否跑赢指数）。两者回答的问题不同，不要混用。
 
@@ -137,7 +142,7 @@ python inspect_eval_results.py   # 全部通过时输出 "All ... checks passed.
 
 ## 结果（测试段 2023-01-01 → 2025-12-31，5 seed）
 
-### 单 seed（论文口径，mean ± std，`results/eval_table.csv`）
+### 单 seed（论文口径，mean ± std，`results/tables/seed_mean_std.csv`）
 
 | market | model | IC | ICIR | RankIC | RankICIR | AR | STD | MDD | Sharpe | Sortino | Calmar |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -150,7 +155,7 @@ python inspect_eval_results.py   # 全部通过时输出 "All ... checks passed.
 | sp500 | TCN | -0.0013±0.0010 | -0.0142±0.0107 | -0.0013±0.0007 | -0.0118±0.0063 | 0.007±0.032 | 0.139±0.007 | -0.181±0.014 | 0.049±0.227 | 0.076±0.325 | 0.045±0.178 |
 | sp500 | Transformer | 0.0031±0.0017 | 0.0253±0.0134 | 0.0063±0.0016 | 0.0475±0.0110 | 0.013±0.018 | 0.165±0.008 | -0.223±0.016 | 0.074±0.102 | 0.093±0.131 | 0.056±0.076 |
 
-### seed ensemble（raw 平均，`results/eval_ensemble_table.csv`）
+### seed ensemble（raw 平均，`results/tables/ensemble.csv`）
 
 | market | model | IC | ICIR | RankIC | RankICIR | AR | STD | MDD | Sharpe | Sortino | Calmar |
 |---|---|---|---|---|---|---|---|---|---|---|---|
